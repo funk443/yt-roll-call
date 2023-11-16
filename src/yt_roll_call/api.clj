@@ -24,7 +24,8 @@
 
 (def yt-get
   (let [api-base-url "https://www.googleapis.com/youtube/v3"
-        api-key (.trim (slurp "./token"))]
+        api-key (and (.exists (clojure.java.io/file "token"))
+                     (.trim (slurp "token")))]
     (fn [endpoint q-string]
       (-> (.concat api-base-url endpoint)
           (http/get {:accept :json

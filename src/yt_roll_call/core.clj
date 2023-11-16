@@ -21,9 +21,18 @@
   (:gen-class)
   (:require [yt-roll-call.api :as api]
             [yt-roll-call.message :as message])
-  (:import [javax.swing JFrame JLabel JTextField JButton JPanel]
+  (:import [javax.swing
+            JFrame
+            JLabel
+            JTextField
+            JButton
+            JPanel
+            JTextArea
+            BoxLayout
+            Box]
+           [javax.swing.event CaretListener]
            [java.awt.event ActionListener]
-           [java.awt GridBagLayout GridBagConstraints Insets Dimension]))
+           [java.awt BorderLayout Insets Dimension]))
 
 
 (def messages-and-author-ids (atom [[] []]))
@@ -31,13 +40,17 @@
 
 (defn make-update-message-thread [video-id messages-and-author-ids-atom]
   (Thread. (fn []
-             (swap! messages-and-author-ids-atom
-                    (fn [[messages author-ids]]
-                      (message/new-messages (api/fetch-messages video-id)
-                                            messages
-                                            author-ids)))
-             (Thread/sleep 10000)
-             (recur))))
+             (cond
+               (Thread/interrupted)
+               nil
+               :else
+               (do (swap! messages-and-author-ids-atom
+                          (fn [[messages author-ids]]
+                            (message/new-messages (api/fetch-messages video-id)
+                                                  messages
+                                                  author-ids)))
+                   (Thread/sleep 10000)
+                   (recur))))))
 
 (defn display-message [author-label
                        content-label
@@ -53,7 +66,7 @@
           (.setText content-label (:content message))
           (swap! messages-and-author-id-atoms
                  (fn [_]
-                   [(vec (rest messages)) author-ids]))))))
+                   [(subvec messages 1) author-ids]))))))
 
 (defn ok-button-action [text-field
                         author-field
@@ -64,77 +77,111 @@
     (actionPerformed [_ evt]
       (let [button (.getSource evt)
             video-id (.getText text-field)]
+        (and @current-update-thread (.interrupt @current-update-thread))
         (swap! current-thread-atom
                (fn [_]
                  (make-update-message-thread video-id
                                              messages-and-author-ids-atom)))
-        (.start @current-thread-atom)
         (.setEnabled button false)
-        (Thread/sleep 2000)
-        (display-message author-field
-                         content-field
-                         messages-and-author-ids-atom)))))
+        (.setText author-field "Please")
+        (.setText content-field "wait")
+        (.start @current-thread-atom)
+        (loop [counter 0]
+          (cond
+            (> counter 100)
+            (do (.setText author-field "nil")
+                (.setText content-field "nil")
+                nil)
+            (empty? (first @messages-and-author-ids-atom))
+            (do (Thread/sleep 200)
+                (recur (inc counter)))
+            :else
+            (display-message author-field
+                             content-field
+                             messages-and-author-ids-atom)))))))
 
 
-(def main-frame (JFrame. "Hello"))
-(def grid-bag-layout (GridBagLayout.))
-(def grid-bag-constraint (GridBagConstraints.))
-(def video-id-input (JTextField. "Video ID Here"))
+(def main-frame (JFrame. "點點名"))
+(def video-id-label (JLabel. "Video ID: "))
+(def video-id-input (JTextField.))
 (def video-id-button (JButton. "ok"))
-(def message-author (JLabel. "nil"))
+(def message-author (JLabel. "nil" javax.swing.SwingConstants/RIGHT))
 (def message-content (JLabel. "nil"))
 (def next-button (JButton. "next"))
+(def info-button (JButton. "info"))
 
-(.setLayout main-frame grid-bag-layout)
-(.setSize main-frame 500 500)
-(.setDefaultCloseOperation main-frame JFrame/EXIT_ON_CLOSE)
+(doto main-frame
+  (.setSize 500 200)
+  (.setLayout nil)
+  (.setDefaultCloseOperation JFrame/EXIT_ON_CLOSE)
+  (.setResizable false)
+  (.add video-id-label)
+  (.add video-id-input)
+  (.add video-id-button)
+  (.add message-author)
+  (.add message-content)
+  (.add next-button)
+  (.add info-button))
 
-(set! (. grid-bag-constraint fill) GridBagConstraints/HORIZONTAL)
-(set! (. grid-bag-constraint insets) (Insets. 10 5 10 5))
-(set! (. grid-bag-constraint weightx) 0.2)
-(set! (. grid-bag-constraint weighty) 0.2)
-
-(set! (. grid-bag-constraint gridwidth) 2)
-(set! (. grid-bag-constraint gridx) 0)
-(set! (. grid-bag-constraint gridy) 0)
-(.add main-frame video-id-input grid-bag-constraint)
-(.setPreferredSize video-id-input (Dimension. 200 30))
-
-(set! (. grid-bag-constraint gridwidth) 1)
-(set! (. grid-bag-constraint gridx) 2)
-(set! (. grid-bag-constraint gridy) 0)
-(.add main-frame video-id-button grid-bag-constraint)
-(.setPreferredSize video-id-button (Dimension. 50 30))
+(.setBounds video-id-label 10 10 80 30)
+(.setBounds video-id-input 100 10 250 30)
+(.setBounds video-id-button 360 10 80 30)
 (.addActionListener video-id-button (ok-button-action video-id-input
                                                       message-author
                                                       message-content
                                                       current-update-thread
                                                       messages-and-author-ids))
 
-(set! (. grid-bag-constraint gridwidth) 1)
-(set! (. grid-bag-constraint gridx) 0)
-(set! (. grid-bag-constraint gridy) 1)
-(.add main-frame message-author grid-bag-constraint)
-(.setPreferredSize message-author (Dimension. 150 30))
+(.setBounds message-author 10 60 150 30)
+(.setBounds message-content 170 60 300 30)
 
-(set! (. grid-bag-constraint gridwidth) 2)
-(set! (. grid-bag-constraint gridx) 1)
-(set! (. grid-bag-constraint gridy) 1)
-(.add main-frame message-content grid-bag-constraint)
-(.setPreferredSize message-content (Dimension. 300 30))
-
-(set! (. grid-bag-constraint gridwidth) 1)
-(set! (. grid-bag-constraint gridx) 1)
-(set! (. grid-bag-constraint gridy) 2)
-(.add main-frame next-button grid-bag-constraint)
+(.setBounds next-button 200 110 100 30)
 (.addActionListener next-button (reify ActionListener
                                   (actionPerformed [_ evt]
                                     (display-message message-author
                                                      message-content
                                                      messages-and-author-ids))))
 
+;; The ActionListener of this button is defined in the info section.
+(.setBounds info-button 200 160 100 30)
+
+
+(def not-found-frame (JFrame. "File Not Found"))
+(def not-found-label (JLabel. "Token file ('token') not found."))
+
+(doto not-found-frame
+  (.setSize 300 200)
+  (.setDefaultCloseOperation JFrame/EXIT_ON_CLOSE)
+  (.add not-found-label))
+
+
+(def info-frame (JFrame. "Info"))
+(def info-text (JTextArea. "yt-roll-call  Copyright (C) 2023  CToID
+
+This program comes with ABSOLUTELY NO WARRANTY.
+
+This is free software, and you are welcome to redistribute it under certain conditions. See the GNU General Public License in <https://www.gnu.org/licenses>, for more details.
+
+The source code of this program is hosted at <https://www.github.com/funk443/yt-roll-call>."))
+
+(doto info-frame
+  (.setSize 500 200)
+  (.setDefaultCloseOperation JFrame/HIDE_ON_CLOSE)
+  (.add info-text))
+
+(doto info-text
+  (.setMargin (Insets. 5 5 5 5))
+  (.setLineWrap true)
+  (.setWrapStyleWord true)
+  (.setEditable false))
+
+(.addActionListener info-button (reify ActionListener
+                                  (actionPerformed [_ evt]
+                                    (.setVisible info-frame true))))
 
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (.setVisible main-frame true))
+  (if (.exists (clojure.java.io/file "token"))
+    (.setVisible main-frame true)
+    (.setVisible not-found-frame true)))
